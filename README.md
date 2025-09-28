@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Prototipo funcional – Recordatorios de Validación de Datos (Microservicios)
 
 Este repositorio demuestra, con **código real**, la arquitectura planteada en la semana 3: un microservicio de **recordatorios** que avisa a los alumnos para **validar sus datos en SAIIUT**, y un **adaptador SAIIUT** (mock) que permite probar el flujo sin depender del sistema real. Incluye además un **API Gateway (Nginx)** y una **UI mínima** para operación.
@@ -125,3 +126,7 @@ docker compose up -d
 
 ## Créditos
 Autoría del estudiante. Este repo es un prototipo académico para demostrar arquitectura y viabilidad técnica.
+=======
+# Arquitectura
+Proyecto-arquitectura
+>>>>>>> 27276f5bbe8cc7c71d2854f1309e3e012d9a2ba6
