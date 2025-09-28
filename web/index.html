@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Recordatorios SAIIUT – Admin</title>
+  <style>
+    :root {
+      --bg:#0b1020; --panel:#121a33; --muted:#7f8bb3; --text:#e8ecff;
+      --ok:#2ecc71; --warn:#f1c40f; --bad:#e74c3c; --chip:#1c2752; --accent:#4c8dff;
+      --line:#23305a;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font-family:ui-sans-serif,system-ui,Segoe UI,Arial;background:var(--bg);color:var(--text)}
+    .wrap{max-width:1100px;margin:24px auto;padding:0 16px}
+    h1{font-size:22px;margin:0 0 14px}
+    .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    button{background:var(--accent);color:#fff;border:none;padding:10px 12px;border-radius:10px;cursor:pointer}
+    button.secondary{background:#2b376b}
+    button.warn{background:var(--warn);color:#222}
+    button.bad{background:#e74c3c}
+    input,select,textarea{background:#0d1530;border:1px solid var(--line);color:var(--text);padding:9px;border-radius:10px}
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    th,td{padding:10px;border-bottom:1px solid var(--line);text-align:left}
+    th{color:#b9c6ff;font-weight:600;background:#0f1833}
+    tr:hover{background:#0e1530}
+    .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;background:var(--chip);border-radius:999px;font-size:12px;color:#cfe1ff}
+    .chip.ok{background:#173a2b;color:#a8ffcc}
+    .chip.warn{background:#4a3a16;color:#ffe7a1}
+    .chip.bad{background:#4a1e20;color:#ffb3b8}
+    .stat{display:flex;gap:8px;align-items:center}
+    .stat b{font-size:18px}
+    .muted{color:var(--muted);font-size:13px}
+    .spacer{flex:1}
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;padding:20px}
+    .modal.open{display:flex}
+    .modal .content{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:700px;width:100%;padding:16px}
+    .pill{padding:4px 8px;border-radius:999px;background:#1b2447;border:1px solid var(--line);font-size:12px;color:#cfe1ff}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Recordatorios SAIIUT – Admin <span class="muted">(demo)</span></h1>
+
+    <div class="card bar">
+      <div class="row">
+        <button id="btnWindow">Crear ventana (hoy → +7 días)</button>
+        <button id="btnImport">Importar alumnos demo</button>
+        <button id="btnRun">Ejecutar campaña</button>
+        <span class="muted">Auto‑refresh cada <b>10s</b>. Quiet hours 22:00–07:00. Backoff 0h/24h/72h/120h.</span>
+      </div>
+      <div class="spacer"></div>
+      <div class="row">
+        <span class="pill">Reminders: <code>http://localhost:4000</code></span>
+        <span class="pill">SAIIUT: <code>http://localhost:4001</code></span>
+      </div>
+    </div>
+
+    <div class="card bar">
+      <div class="row">
+        <input id="validateId" placeholder="student_id a validar en SAIIUT (ej. stu-1)" />
+        <button class="secondary" id="btnValidate">Marcar VALIDATED</button>
+        <span id="valMsg" class="muted"></span>
+      </div>
+      <div class="spacer"></div>
+      <div class="row">
+        <div class="stat"><span class="chip bad">Pendientes</span><b id="cntPending">0</b></div>
+        <div class="stat"><span class="chip ok">Validados</span><b id="cntValidated">0</b></div>
+        <div class="stat"><span class="chip warn">Opt‑out</span><b id="cntOptout">0</b></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <b>Alumnos</b>
+        <div class="row">
+          <input id="filter" placeholder="Filtrar por nombre/email..." />
+          <button class="secondary" id="btnRefresh">Actualizar</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Status</th><th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="modal" id="modalAttempts">
+    <div class="content">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h3 style="margin:0">Intentos de envío</h3>
+        <button class="secondary" id="btnCloseModal">Cerrar</button>
+      </div>
+      <div id="attemptsBody" class="muted" style="margin-top:10px"></div>
+    </div>
+  </div>
+
+  <script>
+    const REM = 'http://localhost:4000';
+    const SAIIUT = 'http://localhost:4001';
+
+    const $ = s => document.querySelector(s);
+    function badge(status){
+      const st = String(status||'').toUpperCase();
+      if(st==='VALIDATED') return '<span class="chip ok">VALIDATED</span>';
+      if(st==='OPTOUT') return '<span class="chip warn">OPTOUT</span>';
+      return '<span class="chip bad">PENDING</span>';
+    }
+    async function api(url, opts){ const r=await fetch(url, opts); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+
+    async function createWindow(){
+      const starts = new Date();
+      const ends = new Date(Date.now()+7*24*3600*1000);
+      await api(REM+'/windows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({period_id:'2025Q1',starts_at:starts,ends_at:ends})});
+      alert('Ventana: OK');
+    }
+    async function importStudents(){
+      const students=[
+        { id:'stu-1', name:'Ana',  phone:'+5215550000001', email:'ana@test.com',  saiiut_id:'stu-1' },
+        { id:'stu-2', name:'Luis', phone:'+5215550000002', email:'luis@test.com', saiiut_id:'stu-2' },
+        { id:'stu-3', name:'Mía',  phone:'+5215550000003', email:'mia@test.com',  saiiut_id:'stu-3' }
+      ];
+      await api(REM+'/students/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({students})});
+      await loadStudents();
+    }
+    async function runCampaign(){
+      await api(REM+'/campaigns/run',{method:'POST'});
+      alert('Campaña ejecutándose. El cron corre cada minuto.');
+    }
+    async function validateOne(){
+      const id = document.querySelector('#validateId').value.trim(); if(!id) return;
+      const j = await api(SAIIUT+'/admin/validate/'+encodeURIComponent(id),{method:'POST'});
+      document.querySelector('#valMsg').textContent = `OK: ${j.student_id} → ${j.validation_status}`;
+      await loadStudents();
+    }
+    async function optout(id){
+      if(!confirm('¿Marcar opt-out?')) return;
+      await api(REM+'/students/'+encodeURIComponent(id)+'/optout',{method:'POST'});
+      await loadStudents();
+    }
+    async function viewAttempts(id){
+      const j = await api(REM+'/attempts?student_id='+encodeURIComponent(id));
+      const body = j.length ? ('<ul>'+j.map(a=>`<li><b>#${a.attempt_no}</b> · ${a.channel} · ${a.status} · <span class="muted">${new Date(a.sent_at).toLocaleString()}</span></li>`).join('')+'</ul>') : '<i>Sin intentos</i>';
+      document.querySelector('#attemptsBody').innerHTML = body;
+      document.querySelector('#modalAttempts').classList.add('open');
+    }
+    function rowActions(s){
+      return [
+        `<button class="secondary" onclick="viewAttempts('${s.id}')">Ver intentos</button>`,
+        `<button class="warn" onclick="optout('${s.id}')">Opt‑out</button>`
+      ].join(' ');
+    }
+    async function loadStudents(){
+      const j = await api(REM+'/students');
+      const f = (document.querySelector('#filter')?.value||'').toLowerCase();
+      const data = j.filter(x=> (x.name?.toLowerCase().includes(f) || x.email?.toLowerCase().includes(f) || x.id?.toLowerCase().includes(f)));
+      document.querySelector('#cntPending').textContent = j.filter(x=>x.status==='PENDING').length;
+      document.querySelector('#cntValidated').textContent = j.filter(x=>x.status==='VALIDATED').length;
+      document.querySelector('#cntOptout').textContent = j.filter(x=>x.optout===true).length;
+      const tb = document.querySelector('#tbody'); tb.innerHTML='';
+      data.forEach(s=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${s.id}</td><td>${s.name||''}</td><td>${s.phone||''}</td><td>${s.email||''}</td><td>${badge(s.status)}</td><td>${rowActions(s)}</td>`;
+        tb.appendChild(tr);
+      });
+    }
+    // Events
+    document.querySelector('#btnWindow').onclick = createWindow;
+    document.querySelector('#btnImport').onclick = importStudents;
+    document.querySelector('#btnRun').onclick = runCampaign;
+    document.querySelector('#btnValidate').onclick = validateOne;
+    document.querySelector('#btnRefresh').onclick = loadStudents;
+    document.querySelector('#btnCloseModal').onclick = ()=>document.querySelector('#modalAttempts').classList.remove('open');
+    // Auto-refresh
+    loadStudents();
+    setInterval(loadStudents, 10000);
+    window.viewAttempts = viewAttempts;
+    window.optout = optout;
+  </script>
+</body>
+</html>
